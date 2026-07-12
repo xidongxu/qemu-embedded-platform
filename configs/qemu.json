@@ -1,5 +1,5 @@
 {
-    "branch": "stable-11.0",
-    "commit": "e545d8bb9d63e9dd61542b88463183314cff9482",
-    "overlay": "stable-11.0"
+    "branch": "master",
+    "commit": "a759542a2c62f0fd3b65f5a66ad9868201014669",
+    "overlay": "master"
 }
