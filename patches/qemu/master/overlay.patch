@@ -30,10 +30,10 @@ index f101c1b7c3..45df3595a1 100644
  
  static void mps2_tz_idau_check(IDAUInterface *ii, uint32_t address,
 diff --git a/hw/display/meson.build b/hw/display/meson.build
-index e730c289b1..b3bad7b8de 100644
+index ffecedbf70..9b4ad77309 100644
 --- a/hw/display/meson.build
 +++ b/hw/display/meson.build
-@@ -37,6 +37,8 @@ system_ss.add(when: 'CONFIG_VGA', if_true: files('vga.c'))
+@@ -38,6 +38,8 @@ system_ss.add(when: 'CONFIG_VGA', if_true: files('vga.c'))
  system_ss.add(when: 'CONFIG_VIRTIO', if_true: files('virtio-dmabuf.c'))
  system_ss.add(when: 'CONFIG_DM163', if_true: files('dm163.c'))
  
