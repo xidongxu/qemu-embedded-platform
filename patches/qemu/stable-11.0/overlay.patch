@@ -1,0 +1,222 @@
+diff --git a/hw/arm/mps2-tz.c b/hw/arm/mps2-tz.c
+index f101c1b7c3..45df3595a1 100644
+--- a/hw/arm/mps2-tz.c
++++ b/hw/arm/mps2-tz.c
+@@ -76,6 +76,7 @@
+ #include "hw/core/qdev-clock.h"
+ #include "qom/object.h"
+ #include "hw/core/irq.h"
++#include "hw/display/mpsx_simple_lcd.h"
+ 
+ #define MPS2TZ_NUMIRQ_MAX 96
+ #define MPS2TZ_RAM_MAX 5
+@@ -1214,6 +1215,18 @@ static void mps2tz_common_init(MachineState *machine)
+ 
+     armv7m_load_kernel(mms->iotkit.armv7m[0].cpu, machine->kernel_filename,
+                        0, boot_ram_size(mms));
++
++    /*
++     * Simple framebuffer LCD
++     */
++    {
++        DeviceState *dev;
++        SysBusDevice *sbd;
++        dev = qdev_new(TYPE_MPSX_SIMPLE_LCD);
++        sbd = SYS_BUS_DEVICE(dev);
++        sysbus_realize_and_unref(sbd, &error_fatal);
++        sysbus_mmio_map(sbd, 0, 0x51000000);
++    }
+ }
+ 
+ static void mps2_tz_idau_check(IDAUInterface *ii, uint32_t address,
+diff --git a/hw/display/meson.build b/hw/display/meson.build
+index e730c289b1..b3bad7b8de 100644
+--- a/hw/display/meson.build
++++ b/hw/display/meson.build
+@@ -37,6 +37,8 @@ system_ss.add(when: 'CONFIG_VGA', if_true: files('vga.c'))
+ system_ss.add(when: 'CONFIG_VIRTIO', if_true: files('virtio-dmabuf.c'))
+ system_ss.add(when: 'CONFIG_DM163', if_true: files('dm163.c'))
+ 
++system_ss.add(files('mpsx_simple_lcd.c'))
++
+ stub_ss.add([files('acpi-vga-stub.c'), pixman])
+ if (config_all_devices.has_key('CONFIG_VGA_CIRRUS') or
+     config_all_devices.has_key('CONFIG_VGA_PCI') or
+diff --git a/hw/display/mpsx_simple_lcd.c b/hw/display/mpsx_simple_lcd.c
+new file mode 100644
+index 0000000000..437b03cbff
+--- /dev/null
++++ b/hw/display/mpsx_simple_lcd.c
+@@ -0,0 +1,141 @@
++#include "qemu/osdep.h"
++#include "hw/display/mpsx_simple_lcd.h"
++#include "hw/core/qdev.h"
++
++#include "system/address-spaces.h"
++#include "system/memory.h"
++
++#include "qemu/log.h"
++
++#define REG_WIDTH       0x00
++#define REG_HEIGHT      0x04
++#define REG_FB_ADDR     0x08
++#define REG_UPDATE      0x0c
++#define REG_FORMAT      0x10
++
++static void mpsx_lcd_refresh(MPSXSimpleLCDState *s) {
++    uint32_t x = 0, y = 0;
++    uint32_t *dst = NULL;
++    uint32_t pixel = 0;
++    MemTxResult ret = MEMTX_OK;
++
++    if (!s->surface) {
++        return;
++    }
++    if (s->fb_addr == 0) {
++        return;
++    }
++    dst = surface_data(s->surface);
++    for (y = 0; y < s->height; y++) {
++        for (x = 0; x < s->width; x++) {
++            ret = address_space_read(
++                &address_space_memory,
++                s->fb_addr + (y * s->width + x) * 4,
++                MEMTXATTRS_UNSPECIFIED,
++                &pixel,
++                sizeof(pixel)
++            );
++            if (ret != MEMTX_OK) {
++                printf("fb read failed addr=0x%" HWADDR_PRIx "\n", (hwaddr)s->fb_addr);
++                return;
++            }
++            dst[y * s->width + x] = pixel;
++        }
++    }
++    qemu_console_update(s->console, 0, 0, s->width, s->height);
++}
++
++static uint64_t mpsx_lcd_read(void *opaque, hwaddr addr, unsigned size) {
++    MPSXSimpleLCDState *s = opaque;
++    printf("LCD READ addr=0x%" HWADDR_PRIx "\n", addr);
++    switch (addr) {
++    case REG_WIDTH:
++        return s->width;
++    case REG_HEIGHT:
++        return s->height;
++    case REG_FB_ADDR:
++        return s->fb_addr;
++    case REG_UPDATE:
++        return s->update;
++    case REG_FORMAT:
++        return s->format;
++    default:
++        qemu_log_mask(LOG_GUEST_ERROR, "mpsx-simple-lcd: bad read " HWADDR_FMT_plx "\n", addr);
++        return 0;
++    }
++}
++
++static void mpsx_lcd_write(void *opaque, hwaddr addr, uint64_t value, unsigned size) {
++    MPSXSimpleLCDState *s = opaque;
++    printf("LCD WRITE addr=0x%" HWADDR_PRIx" value=0x%" PRIx64 "\n", addr, value);
++    switch (addr) {
++    case REG_FB_ADDR:
++        s->fb_addr = value;
++        break;
++    case REG_UPDATE:
++        printf("LCD UPDATE write %lld\n", value);
++        s->update = value;
++        mpsx_lcd_refresh(s);
++        qemu_log("mpsx-simple-lcd update fb=0x%08x\n", s->fb_addr);
++        break;
++    default:
++        qemu_log_mask(LOG_GUEST_ERROR, "mpsx-simple-lcd: bad write " HWADDR_FMT_plx "\n", addr);
++        break;
++    }
++}
++
++static const MemoryRegionOps mpsx_lcd_ops = {
++    .read = mpsx_lcd_read,
++    .write = mpsx_lcd_write,
++    .endianness = DEVICE_LITTLE_ENDIAN,
++    .valid = {
++        .min_access_size = 4,
++        .max_access_size = 4,
++    },
++};
++
++static bool mpsx_lcd_gfx_update(void *opaque) {
++    MPSXSimpleLCDState *s = opaque;
++    mpsx_lcd_refresh(s);
++    return true;
++}
++
++static const GraphicHwOps mpsx_lcd_gfx_ops = {
++    .gfx_update = mpsx_lcd_gfx_update,
++};
++
++static void mpsx_lcd_realize(DeviceState *dev, Error **errp) {
++    MPSXSimpleLCDState *s = MPSX_SIMPLE_LCD(dev);
++    s->width = 320;
++    s->height = 240;
++    s->format = 0;
++    s->console = qemu_graphic_console_create(dev, 0, &mpsx_lcd_gfx_ops, s);
++    if (!s->console) {
++        printf("mpsx simple lcd console create failed\n");
++    }
++    s->surface = qemu_create_displaysurface(s->width, s->height);
++    qemu_console_set_surface(s->console, s->surface);
++    qemu_console_update(s->console, 0, 0, s->width, s->height);
++    printf("mpsx simple lcd surface format bpp=%d\n", surface_bits_per_pixel(s->surface));
++    memory_region_init_io(&s->iomem, OBJECT(dev), &mpsx_lcd_ops, s, "mpsx-simple-lcd", 0x1000);
++    sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iomem);
++    printf("mpsx simple lcd realize: %dx%d\n", s->width, s->height);
++}
++
++static void mpsx_lcd_class_init(ObjectClass *klass, const void *data) {
++    DeviceClass *dc = DEVICE_CLASS(klass);
++    dc->realize = mpsx_lcd_realize;
++}
++
++static const TypeInfo mpsx_lcd_type_info = {
++    .name = TYPE_MPSX_SIMPLE_LCD,
++    .parent = TYPE_SYS_BUS_DEVICE,
++    .instance_size = sizeof(MPSXSimpleLCDState),
++    .class_init = mpsx_lcd_class_init,
++};
++
++static void mpsx_lcd_register_types(void) {
++    type_register_static(&mpsx_lcd_type_info);
++}
++
++type_init(mpsx_lcd_register_types)
+diff --git a/include/hw/display/mpsx_simple_lcd.h b/include/hw/display/mpsx_simple_lcd.h
+new file mode 100644
+index 0000000000..3b8f99a1e0
+--- /dev/null
++++ b/include/hw/display/mpsx_simple_lcd.h
+@@ -0,0 +1,25 @@
++#ifndef HW_DISPLAY_MPSX_SIMPLE_LCD_H
++#define HW_DISPLAY_MPSX_SIMPLE_LCD_H
++
++#include "hw/core/sysbus.h"
++#include "ui/console.h"
++#include "ui/surface.h"
++#include "system/memory.h"
++
++#define TYPE_MPSX_SIMPLE_LCD "mpsx-simple-lcd"
++
++OBJECT_DECLARE_SIMPLE_TYPE(MPSXSimpleLCDState, MPSX_SIMPLE_LCD)
++
++struct MPSXSimpleLCDState {
++    SysBusDevice parent_obj;
++    MemoryRegion iomem;
++    QemuConsole *console;
++    DisplaySurface *surface;
++    uint32_t width;
++    uint32_t height;
++    uint32_t fb_addr;
++    uint32_t update;
++    uint32_t format;
++};
++
++#endif
