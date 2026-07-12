@@ -20,7 +20,7 @@ Write-Host ""
 # Init submodule
 #
 Write-Host "Initialize qemu submodule..."
-git submodule update --init qemu
+git submodule update --init --recursive qemu
 if ($LASTEXITCODE -ne 0) {
     throw "Initialize qemu submodule failed."
 }
