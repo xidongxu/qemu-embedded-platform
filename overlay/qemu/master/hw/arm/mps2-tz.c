@@ -77,6 +77,7 @@
 #include "qom/object.h"
 #include "hw/core/irq.h"
 #include "hw/display/mpsx_simple_lcd.h"
+#include "hw/input/mpsx_simple_touch.h"
 
 #define MPS2TZ_NUMIRQ_MAX 96
 #define MPS2TZ_RAM_MAX 5
@@ -1226,6 +1227,17 @@ static void mps2tz_common_init(MachineState *machine)
         sbd = SYS_BUS_DEVICE(dev);
         sysbus_realize_and_unref(sbd, &error_fatal);
         sysbus_mmio_map(sbd, 0, 0x51000000);
+    }
+    /*
+     * Simple Touch Device
+     */
+    {
+        DeviceState *dev;
+        SysBusDevice *sbd;
+        dev = qdev_new(TYPE_MPSX_SIMPLE_TOUCH);
+        sbd = SYS_BUS_DEVICE(dev);
+        sysbus_realize_and_unref(sbd, &error_fatal);
+        sysbus_mmio_map(sbd, 0, 0x51001000);
     }
 }
 
