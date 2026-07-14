@@ -11,10 +11,12 @@ OBJECT_DECLARE_SIMPLE_TYPE(MPSXSimpleTouchState, MPSX_SIMPLE_TOUCH)
 struct MPSXSimpleTouchState {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
+    QemuInputHandlerState *input;
     qemu_irq irq;
     uint32_t status;
     uint32_t x;
     uint32_t y;
+    bool pen_down;
 };
 
 #endif
