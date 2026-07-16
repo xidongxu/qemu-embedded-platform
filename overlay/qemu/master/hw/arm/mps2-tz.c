@@ -1238,7 +1238,7 @@ static void mps2tz_common_init(MachineState *machine)
         sbd = SYS_BUS_DEVICE(dev);
         sysbus_realize_and_unref(sbd, &error_fatal);
         sysbus_mmio_map(sbd, 0, 0x51001000);
-        sysbus_connect_irq(sbd, 0, get_sse_irq_in(mms, 37));
+        sysbus_connect_irq(sbd, 0, get_sse_irq_in(mms, 32));
     }
 }
 

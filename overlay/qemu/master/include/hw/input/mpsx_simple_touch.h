@@ -16,7 +16,7 @@ struct MPSXSimpleTouchState {
     uint32_t status;
     uint32_t x;
     uint32_t y;
-    bool pen_down;
+    bool pressed;
 };
 
 #endif

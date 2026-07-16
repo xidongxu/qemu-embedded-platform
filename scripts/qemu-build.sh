@@ -45,5 +45,5 @@ make install
 echo "==> Install finished"
 
 echo "==> Running testcase starting"
-${BUILD_DIR}/qemu-system-arm.exe -machine mps2-an505 -cpu cortex-m33 -m 16M -kernel ${TEST_DIR}/an505-qemu.elf -display sdl -serial stdio
+${BUILD_DIR}/qemu-system-arm.exe -machine mps2-an505 -cpu cortex-m33 -m 16M -kernel ${TEST_DIR}/an505-qemu.elf -display sdl,show-cursor=on -serial stdio
 echo "==> Running testcase finished"

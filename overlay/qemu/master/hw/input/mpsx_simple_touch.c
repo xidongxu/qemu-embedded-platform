@@ -9,14 +9,38 @@
 
 #include "qemu/log.h"
 
-#define REG_STATUS     0x00
-#define REG_X          0x04
-#define REG_Y          0x08
-#define REG_CTRL       0x0c
+#define REG_STATUS          0x00
+#define REG_X               0x04
+#define REG_Y               0x08
+#define REG_CTRL            0x0c
+#define REG_ID              0x10
+#define REG_RES_X           0x14
+#define REG_RES_Y           0x18
+
+#define STATUS_PRESSED      (1 << 0)
+#define STATUS_READY        (1 << 1)
+
+#define CTRL_CLEAR_INT      (1 << 0)
+
+/* Touch ADC resolution (12-bit) */
+#define TOUCH_X_RESOLUTION  4096
+#define TOUCH_Y_RESOLUTION  4096
+
+/* "MPSX" */
+#define TOUCH_ID            0x4D505358
+
+/* QEMU absolute input range */
+#define QEMU_ABS_MAX        32767
 
 static void mpsx_touch_update_irq(MPSXSimpleTouchState *s) {
-    printf("TOUCH IRQ status=%d irq=%p\n", s->status, s->irq);
     qemu_set_irq(s->irq, s->status ? 1 : 0);
+}
+
+static uint32_t mpsx_touch_scale(uint32_t value, uint32_t resolution) {
+    if (value > QEMU_ABS_MAX) {
+        value = QEMU_ABS_MAX;
+    }
+    return value * (resolution - 1) / QEMU_ABS_MAX;
 }
 
 static void mpsx_touch_event(DeviceState *dev, QemuConsole *src, QemuInputEvent *evt) {
@@ -24,18 +48,24 @@ static void mpsx_touch_event(DeviceState *dev, QemuConsole *src, QemuInputEvent 
     switch (evt->type) {
     case INPUT_EVENT_KIND_ABS:
         if (evt->abs.axis == INPUT_AXIS_X) {
-            s->x = evt->abs.value;
+            s->x = mpsx_touch_scale(evt->abs.value, TOUCH_X_RESOLUTION);
         } else if (evt->abs.axis == INPUT_AXIS_Y) {
-            s->y = evt->abs.value;
+            s->y = mpsx_touch_scale(evt->abs.value, TOUCH_Y_RESOLUTION);
         }
+        s->status |= STATUS_READY;
         break;
     case INPUT_EVENT_KIND_BTN:
         if (evt->btn.button == INPUT_BUTTON_LEFT || evt->btn.button == INPUT_BUTTON_TOUCH) {
-            s->pen_down = evt->btn.down;
+            s->pressed = evt->btn.down;
             if (evt->btn.down) {
-                s->status = 1;
-                mpsx_touch_update_irq(s);
+                /* Touch Down */
+                s->status |= STATUS_PRESSED;
+                s->status |= STATUS_READY;
+            } else {
+                /* Touch Up */
+                s->status &= ~STATUS_PRESSED;
             }
+            mpsx_touch_update_irq(s);
         }
         break;
     default:
@@ -45,8 +75,8 @@ static void mpsx_touch_event(DeviceState *dev, QemuConsole *src, QemuInputEvent 
 
 static void mpsx_touch_sync(DeviceState *dev) {
     MPSXSimpleTouchState *s = MPSX_SIMPLE_TOUCH(dev);
-    if (s->pen_down) {
-        qemu_log_mask(LOG_GUEST_ERROR, "Touch (%u,%u)\n", s->x, s->y);
+    if (s->pressed) {
+        qemu_log_mask(LOG_GUEST_ERROR, "Touch raw converted (%u,%u)\n", s->x, s->y);
     }
 }
 
@@ -66,6 +96,12 @@ static uint64_t mpsx_touch_read(void *opaque, hwaddr addr, unsigned size) {
         return s->x;
     case REG_Y:
         return s->y;
+    case REG_ID:
+        return TOUCH_ID;
+    case REG_RES_X:
+        return TOUCH_X_RESOLUTION;
+    case REG_RES_Y:
+        return TOUCH_Y_RESOLUTION;
     default:
         return 0;
     }
@@ -75,8 +111,8 @@ static void mpsx_touch_write(void *opaque, hwaddr addr, uint64_t value, unsigned
     MPSXSimpleTouchState *s = opaque;
     switch (addr) {
     case REG_CTRL:
-        if (value == 1) {
-            s->status = 0;
+        if (value & CTRL_CLEAR_INT) {
+            s->status &= ~STATUS_READY;
             mpsx_touch_update_irq(s);
         }
         break;
@@ -104,6 +140,7 @@ static void mpsx_touch_realize(DeviceState *dev, Error **errp) {
     s->status = 0;
     s->x = 0;
     s->y = 0;
+    s->pressed = false;
 }
 
 static void mpsx_touch_unrealize(DeviceState *dev) {

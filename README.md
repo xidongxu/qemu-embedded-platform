@@ -27,6 +27,7 @@ Hello this is qemu embedded platform
 
 ## test target
 ```shell
-.\qemu-system-arm.exe -machine mps2-an505 -cpu cortex-m33 -m 16M -kernel .\an505-qemu.elf -display sdl -serial stdio
+.\qemu-system-arm.exe -machine mps2-an505 -cpu cortex-m33 -m 16M -kernel .\an505-qemu.elf -display sdl,show-cursor=on -serial stdio
 ```
+
 
