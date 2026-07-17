@@ -15,11 +15,16 @@ struct MPSXSimpleLCDState {
     MemoryRegion iomem;
     QemuConsole *console;
     DisplaySurface *surface;
+    hwaddr fb_addr;
     uint32_t width;
     uint32_t height;
-    uint32_t fb_addr;
-    uint32_t update;
+    uint32_t ctrl;
     uint32_t format;
+    uint32_t status;
+    uint32_t stride;
+    uint32_t int_enable;
+    uint32_t int_status;
+    qemu_irq irq;
 };
 
 #endif
