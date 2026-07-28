@@ -33,7 +33,7 @@
 #define QEMU_ABS_MAX        32767
 
 static void mpsx_touch_update_irq(MPSXSimpleTouchState *s) {
-    qemu_set_irq(s->irq, s->status ? 1 : 0);
+    qemu_set_irq(s->irq, (s->status & STATUS_READY) != 0);
 }
 
 static uint32_t mpsx_touch_scale(uint32_t value, uint32_t resolution) {
@@ -53,18 +53,17 @@ static void mpsx_touch_event(DeviceState *dev, QemuConsole *src, QemuInputEvent 
             s->y = mpsx_touch_scale(evt->abs.value, TOUCH_Y_RESOLUTION);
         }
         s->status |= STATUS_READY;
+        mpsx_touch_update_irq(s);
         break;
     case INPUT_EVENT_KIND_BTN:
         if (evt->btn.button == INPUT_BUTTON_LEFT || evt->btn.button == INPUT_BUTTON_TOUCH) {
             s->pressed = evt->btn.down;
             if (evt->btn.down) {
-                /* Touch Down */
                 s->status |= STATUS_PRESSED;
-                s->status |= STATUS_READY;
             } else {
-                /* Touch Up */
                 s->status &= ~STATUS_PRESSED;
             }
+            s->status |= STATUS_READY;
             mpsx_touch_update_irq(s);
         }
         break;
