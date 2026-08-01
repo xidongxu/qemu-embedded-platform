@@ -28,6 +28,9 @@
 #define LCD_FORMAT_ARGB8888 (0)
 #define LCD_FORMAT_RGB888   (1)
 #define LCD_FORMAT_RGB565   (2)
+/* Lcd resolution */
+#define LCD_WIDTH           (450)
+#define LCD_HEIGHT          (450)
 
 static uint32_t mpsx_rgb565_to_argb8888(uint16_t pixel) {
     uint32_t r = 0, g = 0, b = 0;
@@ -40,61 +43,63 @@ static uint32_t mpsx_rgb565_to_argb8888(uint16_t pixel) {
     return 0xff000000 | (r << 16) | (g << 8) | b;
 }
 
-static void mpsx_lcd_refresh(MPSXSimpleLCDState *s) {
-    uint32_t x;
-    uint32_t y;
-    uint32_t *dst;
-    MemTxResult ret;
-    if (!s->surface) {
-        return;
+static uint32_t mpsx_lcd_get_stride(uint32_t width, uint32_t format) {
+    uint32_t stride = 0;
+    switch (format) {
+    case LCD_FORMAT_ARGB8888:
+        stride = width * 4;
+        break;
+    case LCD_FORMAT_RGB888:
+        stride = width * 3;
+        break;
+    case LCD_FORMAT_RGB565:
+        stride = width * 2;
+        break;
+    default:
+        qemu_log_mask(LOG_UNIMP, "mpsx lcd unsupported format %d\n", format);
+        stride = width * 0;
+        break;
     }
-    if (s->fb_addr == 0) {
+    assert(stride > 0);
+    return stride;
+}
+
+static void mpsx_lcd_refresh(MPSXSimpleLCDState *s) {
+    uint32_t *dst = NULL;
+    uint32_t x = 0, y = 0;
+    MemTxResult ret = MEMTX_OK;
+    assert(s->width == LCD_WIDTH);
+    static uint16_t line[LCD_WIDTH] = { 0 };
+    if (!s->surface || s->fb_addr == 0) {
         return;
     }
     dst = surface_data(s->surface);
-    for (y = 0; y < s->height; y++) {
-        for (x = 0; x < s->width; x++) {
-            hwaddr addr;
-            addr = s->fb_addr + y * s->stride;
-            switch (s->format)
-            {
-            case LCD_FORMAT_RGB565: {
-                uint16_t pixel;
-                ret = address_space_read(
-                    &address_space_memory,
-                    addr + x * 2,
-                    MEMTXATTRS_UNSPECIFIED,
-                    &pixel,
-                    sizeof(pixel)
-                );
-                if (ret != MEMTX_OK) {
-                    qemu_log_mask(LOG_GUEST_ERROR, "lcd framebuffer read failed\n");
-                    return;
-                }
-                dst[y * s->width + x] = mpsx_rgb565_to_argb8888(pixel);
-                break;
-            }
-            case LCD_FORMAT_ARGB8888: {
-                uint32_t pixel;
-                ret = address_space_read(
-                    &address_space_memory,
-                    addr + x * 4,
-                    MEMTXATTRS_UNSPECIFIED,
-                    &pixel,
-                    sizeof(pixel)
-                );
-                if (ret != MEMTX_OK) {
-                    qemu_log_mask(LOG_GUEST_ERROR, "lcd framebuffer read failed\n");
-                    return;
-                }
-                dst[y * s->width + x] = pixel;
-                break;
-            }
-            default:
-                qemu_log_mask(LOG_UNIMP, "mpsx lcd unsupported format %d\n", s->format);
+    switch (s->format) {
+    case LCD_FORMAT_ARGB8888:
+        size_t fb_size = (size_t)s->height * s->stride;
+        ret = address_space_read(&address_space_memory, s->fb_addr, MEMTXATTRS_UNSPECIFIED, (uint8_t *)dst, fb_size);
+        if (ret != MEMTX_OK) {
+            qemu_log_mask(LOG_GUEST_ERROR, "lcd framebuffer read failed\n");
+            return;
+        }
+        break;
+    case LCD_FORMAT_RGB565:
+        for (y = 0; y < s->height; y++) {
+            hwaddr addr = s->fb_addr + y * s->stride;
+            ret = address_space_read(&address_space_memory, addr, MEMTXATTRS_UNSPECIFIED, line, s->width * sizeof(uint16_t));
+            if (ret != MEMTX_OK) {
+                qemu_log_mask(LOG_GUEST_ERROR, "lcd framebuffer read failed\n");
                 return;
             }
+            uint32_t *dst_line = dst + y * s->width;
+            for (x = 0; x < s->width; x++) {
+                dst_line[x] = mpsx_rgb565_to_argb8888(line[x]);
+            }
         }
+        break;
+    default:
+        qemu_log_mask(LOG_UNIMP, "mpsx lcd unsupported format %d\n", s->format);
+        return;
     }
     qemu_console_update(s->console, 0, 0, s->width, s->height);
 }
@@ -123,8 +128,10 @@ static void mpsx_lcd_reset(DeviceState *dev) {
     s->ctrl = 0;
     s->status = LCD_STATUS_DONE;
     s->fb_addr = 0;
-    s->stride = s->width * 4;
+    s->width = LCD_WIDTH;
+    s->height = LCD_HEIGHT;
     s->format = LCD_FORMAT_ARGB8888;
+    s->stride = mpsx_lcd_get_stride(s->width, s->format);
     s->int_enable = 0;
     s->int_status = 0;
 }
@@ -180,6 +187,7 @@ static void mpsx_lcd_write(void *opaque, hwaddr addr, uint64_t value, unsigned s
     case REG_FORMAT:
         if (value <= LCD_FORMAT_RGB565) {
             s->format = value;
+            s->stride = mpsx_lcd_get_stride(s->width, s->format);
         } else {
             qemu_log_mask(LOG_GUEST_ERROR, "mpsx lcd invalid format=0x%"HWADDR_PRIx"\n", value);
         }
@@ -217,9 +225,9 @@ static const MemoryRegionOps mpsx_lcd_ops = {
 static bool mpsx_lcd_gfx_update(void *opaque) {
     MPSXSimpleLCDState *s = opaque;
     if (s->ctrl & LCD_CTRL_ENABLE) {
-        mpsx_lcd_refresh(s);
+        // mpsx_lcd_refresh(s);
     }
-    return true;
+    return false;
 }
 
 static const GraphicHwOps mpsx_lcd_gfx_ops = {
@@ -228,10 +236,10 @@ static const GraphicHwOps mpsx_lcd_gfx_ops = {
 
 static void mpsx_lcd_realize(DeviceState *dev, Error **errp) {
     MPSXSimpleLCDState *s = MPSX_SIMPLE_LCD(dev);
-    s->width = 450;
-    s->height = 450;
+    s->width = LCD_WIDTH;
+    s->height = LCD_HEIGHT;
     s->format = LCD_FORMAT_ARGB8888;
-    s->stride = s->width * 4;
+    s->stride = mpsx_lcd_get_stride(s->width, s->format);
     s->console = qemu_graphic_console_create(dev, 0, &mpsx_lcd_gfx_ops, s);
     if (!s->console) {
         printf("mpsx simple lcd console create failed\n");
