@@ -78,6 +78,7 @@
 #include "hw/core/irq.h"
 #include "hw/display/mpsx_simple_lcd.h"
 #include "hw/input/mpsx_simple_touch.h"
+#include "hw/audio/mpsx_simple_audio.h"
 
 #define MPS2TZ_NUMIRQ_MAX 96
 #define MPS2TZ_RAM_MAX 5
@@ -1241,6 +1242,21 @@ static void mps2tz_common_init(MachineState *machine)
         sysbus_mmio_map(sbd, 0, 0x51001000);
         sysbus_connect_irq(sbd, 0, get_sse_irq_in(mms, 32));
     }
+    /*
+     * Simple Audio Device
+     */
+    {
+        DeviceState *dev;
+        SysBusDevice *sbd;
+        dev = qdev_new(TYPE_MPSX_SIMPLE_AUDIO);
+        if (machine->audiodev) {
+            qdev_prop_set_string(dev, "audiodev", machine->audiodev);
+        }
+        sbd = SYS_BUS_DEVICE(dev);
+        sysbus_realize_and_unref(sbd, &error_fatal);
+        sysbus_mmio_map(sbd, 0, 0x51002000);
+        sysbus_connect_irq(sbd, 0, get_sse_irq_in(mms, 49));
+    }
 }
 
 static void mps2_tz_idau_check(IDAUInterface *ii, uint32_t address,
@@ -1303,6 +1319,7 @@ static void mps2tz_class_init(ObjectClass *oc, const void *data)
 
     mc->init = mps2tz_common_init;
     mc->reset = mps2_machine_reset;
+    machine_add_audiodev_property(mc);
     iic->check = mps2_tz_idau_check;
 
     /* Most machines leave these at the SSE defaults */
