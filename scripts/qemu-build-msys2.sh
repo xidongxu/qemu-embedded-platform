@@ -6,15 +6,19 @@ if [[ "${MSYSTEM}" != "MINGW64" ]]; then
     exit 1
 fi
 
+# 脚本所在目录 -> 仓库根目录（不依赖固定路径，便于迁移）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "${SCRIPT_DIR}")"
+
 # QEMU源码目录
-QEMU_SRC="/c/Users/xidon/code/github/qemu-embedded-platform/qemu"
+QEMU_SRC="${ROOT_DIR}/qemu"
 
 # 构建目录
 CONFIG_DIR="${QEMU_SRC}/qemu-configure"
 BUILD_DIR="${QEMU_SRC}/qemu-build"
 
 # 测试目录
-TEST_DIR="/c/Users/xidon/code/github/qemu-embedded-platform/testcase"
+TEST_DIR="${ROOT_DIR}/testcase"
 
 echo "==> Enter QEMU source directory"
 cd "${QEMU_SRC}"

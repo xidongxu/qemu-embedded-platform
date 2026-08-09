@@ -40,7 +40,12 @@ try {
     Write-Host "Cleaning qemu..."
     Invoke-Git restore .
     Invoke-Git restore --staged .
-    Invoke-Git clean -fd
+    # 保留构建目录(qemu-configure/qemu-build)，实现增量构建，避免每次全量编译。
+    # 直接调用 git（不走 Invoke-Git），避免 PowerShell 把 -e 当作参数名解析。
+    & git clean -fd -e qemu-configure -e qemu-build
+    if ($LASTEXITCODE -ne 0) {
+        throw "git clean -fd -e qemu-configure -e qemu-build failed."
+    }
     #
     # 检查Patch
     #

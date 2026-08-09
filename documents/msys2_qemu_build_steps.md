@@ -446,10 +446,10 @@ NOTE: The object files are built at the place where configure is launched
 ../configure --prefix=<安装目录> --target-list=aarch64-softmmu,arm-softmmu
 ```
 
->  这里安装目录以：C:\Users\xidon\code\github\qemu-machine\qemu-build 为例
+>  这里安装目录以：C:\Users\<用户名>\code\github\qemu-machine\qemu-build 为例
 
 ``` shell
-../configure --prefix=/C/Users/xidon/code/github/qemu-machine/qemu-build --target-list=arm-softmmu --enable-debug --disable-docs
+../configure --prefix=/C/Users/<用户名>/code/github/qemu-machine/qemu-build --target-list=arm-softmmu --enable-debug --disable-docs
 ```
 
 
