@@ -69,7 +69,10 @@
 #include "hw/dma/pl080.h"
 #include "hw/rtc/pl031.h"
 #include "hw/ssi/pl022.h"
+#include "hw/ssi/ssi.h"
 #include "hw/i2c/arm_sbcon_i2c.h"
+#include "system/blockdev.h"
+#include "system/block-backend.h"
 #include "hw/net/lan9118.h"
 #include "net/net.h"
 #include "hw/core/split-irq.h"
@@ -150,6 +153,8 @@ struct MPS2TZMachineState {
     TZPPC ppc[5];
     TZMPC mpc[3];
     PL022State spi[5];
+    /* SPI NOR flash attached to PL022 spi0 (AN505 only) */
+    DeviceState *spi_flash;
     ArmSbconI2CState i2c[5];
     UnimplementedDeviceState i2s_audio;
     UnimplementedDeviceState gpio[4];
@@ -703,6 +708,7 @@ static MemoryRegion *make_spi(MPS2TZMachineState *mms, void *opaque,
      * Note that if we do implement devices behind SPI, the chip select
      * lines are set via the "MISC" register in the MPS2 FPGAIO device.
      */
+    MPS2TZMachineClass *mmc = MPS2TZ_MACHINE_GET_CLASS(mms);
     PL022State *spi = opaque;
     SysBusDevice *s;
 
@@ -710,6 +716,25 @@ static MemoryRegion *make_spi(MPS2TZMachineState *mms, void *opaque,
     sysbus_realize(SYS_BUS_DEVICE(spi), &error_fatal);
     s = SYS_BUS_DEVICE(spi);
     sysbus_connect_irq(s, 0, get_sse_irq_in(mms, irqs[0]));
+
+    /*
+     * The AN505 has a SPI NOR flash behind SPI controller 0.  Its chip
+     * select is driven by bit 8 of the FPGAIO MISC register, which we
+     * wire up at the end of mps2tz_common_init().  It is optionally
+     * backed by a -drive if=mtd,format=raw,file=... image.
+     */
+    if (mmc->fpga_type == FPGA_AN505 && strcmp(name, "spi0") == 0) {
+        BusState *ssi = qdev_get_child_bus(DEVICE(spi), "ssi");
+        DeviceState *flash = qdev_new("w25q02jvm");
+        DriveInfo *dinfo = drive_get(IF_MTD, 0, 0);
+
+        if (dinfo) {
+            qdev_prop_set_drive(flash, "drive", blk_by_legacy_dinfo(dinfo));
+        }
+        qdev_realize_and_unref(flash, ssi, &error_fatal);
+        mms->spi_flash = flash;
+    }
+
     return sysbus_mmio_get_region(s, 0);
 }
 
@@ -1256,6 +1281,16 @@ static void mps2tz_common_init(MachineState *machine)
         sysbus_realize_and_unref(sbd, &error_fatal);
         sysbus_mmio_map(sbd, 0, 0x51002000);
         sysbus_connect_irq(sbd, 0, get_sse_irq_in(mms, 49));
+    }
+
+    /*
+     * Wire the FPGAIO MISC bit8 (SPI chip select) to the SPI NOR flash
+     * behind PL022 spi0 (AN505 only).
+     */
+    if (mms->spi_flash) {
+        qdev_connect_gpio_out_named(DEVICE(&mms->fpgaio), "spi-cs", 0,
+                                    qdev_get_gpio_in_named(mms->spi_flash,
+                                                           SSI_GPIO_CS, 0));
     }
 }
 

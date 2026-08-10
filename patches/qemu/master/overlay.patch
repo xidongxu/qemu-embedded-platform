@@ -1,8 +1,18 @@
 diff --git a/hw/arm/mps2-tz.c b/hw/arm/mps2-tz.c
-index f101c1b7c3..26092a2ea3 100644
+index f101c1b7c3..4b74fe4de6 100644
 --- a/hw/arm/mps2-tz.c
 +++ b/hw/arm/mps2-tz.c
-@@ -76,6 +76,9 @@
+@@ -69,13 +69,19 @@
+ #include "hw/dma/pl080.h"
+ #include "hw/rtc/pl031.h"
+ #include "hw/ssi/pl022.h"
++#include "hw/ssi/ssi.h"
+ #include "hw/i2c/arm_sbcon_i2c.h"
++#include "system/blockdev.h"
++#include "system/block-backend.h"
+ #include "hw/net/lan9118.h"
+ #include "net/net.h"
+ #include "hw/core/split-irq.h"
  #include "hw/core/qdev-clock.h"
  #include "qom/object.h"
  #include "hw/core/irq.h"
@@ -12,7 +22,50 @@ index f101c1b7c3..26092a2ea3 100644
  
  #define MPS2TZ_NUMIRQ_MAX 96
  #define MPS2TZ_RAM_MAX 5
-@@ -1214,6 +1217,46 @@ static void mps2tz_common_init(MachineState *machine)
+@@ -147,6 +153,8 @@ struct MPS2TZMachineState {
+     TZPPC ppc[5];
+     TZMPC mpc[3];
+     PL022State spi[5];
++    /* SPI NOR flash attached to PL022 spi0 (AN505 only) */
++    DeviceState *spi_flash;
+     ArmSbconI2CState i2c[5];
+     UnimplementedDeviceState i2s_audio;
+     UnimplementedDeviceState gpio[4];
+@@ -700,6 +708,7 @@ static MemoryRegion *make_spi(MPS2TZMachineState *mms, void *opaque,
+      * Note that if we do implement devices behind SPI, the chip select
+      * lines are set via the "MISC" register in the MPS2 FPGAIO device.
+      */
++    MPS2TZMachineClass *mmc = MPS2TZ_MACHINE_GET_CLASS(mms);
+     PL022State *spi = opaque;
+     SysBusDevice *s;
+ 
+@@ -707,6 +716,25 @@ static MemoryRegion *make_spi(MPS2TZMachineState *mms, void *opaque,
+     sysbus_realize(SYS_BUS_DEVICE(spi), &error_fatal);
+     s = SYS_BUS_DEVICE(spi);
+     sysbus_connect_irq(s, 0, get_sse_irq_in(mms, irqs[0]));
++
++    /*
++     * The AN505 has a SPI NOR flash behind SPI controller 0.  Its chip
++     * select is driven by bit 8 of the FPGAIO MISC register, which we
++     * wire up at the end of mps2tz_common_init().  It is optionally
++     * backed by a -drive if=mtd,format=raw,file=... image.
++     */
++    if (mmc->fpga_type == FPGA_AN505 && strcmp(name, "spi0") == 0) {
++        BusState *ssi = qdev_get_child_bus(DEVICE(spi), "ssi");
++        DeviceState *flash = qdev_new("w25q02jvm");
++        DriveInfo *dinfo = drive_get(IF_MTD, 0, 0);
++
++        if (dinfo) {
++            qdev_prop_set_drive(flash, "drive", blk_by_legacy_dinfo(dinfo));
++        }
++        qdev_realize_and_unref(flash, ssi, &error_fatal);
++        mms->spi_flash = flash;
++    }
++
+     return sysbus_mmio_get_region(s, 0);
+ }
+ 
+@@ -1214,6 +1242,56 @@ static void mps2tz_common_init(MachineState *machine)
  
      armv7m_load_kernel(mms->iotkit.armv7m[0].cpu, machine->kernel_filename,
                         0, boot_ram_size(mms));
@@ -56,10 +109,20 @@ index f101c1b7c3..26092a2ea3 100644
 +        sysbus_mmio_map(sbd, 0, 0x51002000);
 +        sysbus_connect_irq(sbd, 0, get_sse_irq_in(mms, 49));
 +    }
++
++    /*
++     * Wire the FPGAIO MISC bit8 (SPI chip select) to the SPI NOR flash
++     * behind PL022 spi0 (AN505 only).
++     */
++    if (mms->spi_flash) {
++        qdev_connect_gpio_out_named(DEVICE(&mms->fpgaio), "spi-cs", 0,
++                                    qdev_get_gpio_in_named(mms->spi_flash,
++                                                           SSI_GPIO_CS, 0));
++    }
  }
  
  static void mps2_tz_idau_check(IDAUInterface *ii, uint32_t address,
-@@ -1276,6 +1319,7 @@ static void mps2tz_class_init(ObjectClass *oc, const void *data)
+@@ -1276,6 +1354,7 @@ static void mps2tz_class_init(ObjectClass *oc, const void *data)
  
      mc->init = mps2tz_common_init;
      mc->reset = mps2_machine_reset;
@@ -902,6 +965,58 @@ index 0000000000..991f467f10
 +}
 +
 +type_init(mpsx_touch_register_types)
+diff --git a/hw/misc/mps2-fpgaio.c b/hw/misc/mps2-fpgaio.c
+index da78cb6070..58b052957c 100644
+--- a/hw/misc/mps2-fpgaio.c
++++ b/hw/misc/mps2-fpgaio.c
+@@ -21,6 +21,7 @@
+ #include "qapi/error.h"
+ #include "trace.h"
+ #include "hw/core/sysbus.h"
++#include "hw/core/irq.h"
+ #include "migration/vmstate.h"
+ #include "hw/core/registerfields.h"
+ #include "hw/misc/mps2-fpgaio.h"
+@@ -215,13 +216,17 @@ static void mps2_fpgaio_write(void *opaque, hwaddr offset, uint64_t value,
+         s->prescale = value;
+         break;
+     case A_MISC:
+-        /* These are control bits for some of the other devices on the
+-         * board (SPI, CLCD, etc). We don't implement that yet, so just
+-         * make the bits read as written.
++        /*
++         * Bit 8 is the chip-select for the SPI NOR flash behind SPI
++         * controller 0 (0 = assert/select, 1 = deassert/release).
++         * The remaining control bits (CLCD etc) are not modelled.
+          */
+-        qemu_log_mask(LOG_UNIMP,
+-                      "MPS2 FPGAIO: MISC control bits unimplemented\n");
++        if (value & ~BIT(8)) {
++            qemu_log_mask(LOG_UNIMP,
++                          "MPS2 FPGAIO: MISC control bits unimplemented\n");
++        }
+         s->misc = value;
++        qemu_set_irq(s->spi_cs, extract32(value, 8, 1));
+         break;
+     case A_CLK1HZ:
+         now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+@@ -262,6 +267,7 @@ static void mps2_fpgaio_reset(DeviceState *dev)
+     s->led0 = 0;
+     s->prescale = 0;
+     s->misc = 0;
++    qemu_set_irq(s->spi_cs, 0);
+     s->clk1hz_tick_offset = tickoff_from_counter(now, 0, 1);
+     s->clk100hz_tick_offset = tickoff_from_counter(now, 0, 100);
+     s->counter = 0;
+@@ -281,6 +287,8 @@ static void mps2_fpgaio_init(Object *obj)
+     memory_region_init_io(&s->iomem, obj, &mps2_fpgaio_ops, s,
+                           "mps2-fpgaio", 0x1000);
+     sysbus_init_mmio(sbd, &s->iomem);
++
++    qdev_init_gpio_out_named(DEVICE(obj), &s->spi_cs, "spi-cs", 1);
+ }
+ 
+ static void mps2_fpgaio_realize(DeviceState *dev, Error **errp)
 diff --git a/include/hw/audio/mpsx_simple_audio.h b/include/hw/audio/mpsx_simple_audio.h
 new file mode 100644
 index 0000000000..71cf90d853
@@ -1010,3 +1125,17 @@ index 0000000000..043a551988
 +};
 +
 +#endif
+diff --git a/include/hw/misc/mps2-fpgaio.h b/include/hw/misc/mps2-fpgaio.h
+index edd9f23121..d46befe900 100644
+--- a/include/hw/misc/mps2-fpgaio.h
++++ b/include/hw/misc/mps2-fpgaio.h
+@@ -46,6 +46,9 @@ struct MPS2FPGAIO {
+     uint32_t misc;
+     uint32_t dbgctrl;
+ 
++    /* GPIO out: SPI flash chip-select, driven by bit 8 of the MISC register */
++    qemu_irq spi_cs;
++
+     /* QEMU_CLOCK_VIRTUAL time at which counter and pscntr were last synced */
+     int64_t pscntr_sync_ticks;
+     /* Values of COUNTER and PSCNTR at time pscntr_sync_ticks */
