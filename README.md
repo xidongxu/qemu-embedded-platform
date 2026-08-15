@@ -2,6 +2,8 @@
 
 基于 QEMU 的嵌入式平台开发环境，内置针对 ARM `mps2-an505`（Cortex-M33）目标板的定制 overlay 补丁，并提供一键打补丁 + 构建 + 运行的完整工作流（Windows / MSYS2）。
 
+overlay 补丁在板级增加了 4 个 **MPSX Simple** 定制外设（LCD 显示、触摸、音频输出、麦克风录音），供裸机/RTOS 固件通过 MMIO 直接驱动，详见[定制外设](#定制外设mpsx-simple-设备)。
+
 ---
 
 ## 目录结构
@@ -27,8 +29,9 @@ qemu-embedded-platform/
 │   ├── qemu-sync.ps1        # 同步 qemu 子模块到配置的 commit
 │   └── qemu-export-patch.ps1# 把 overlay 导出为补丁
 ├── testcase/
-│   └── an505-qemu.elf       # 测试固件
-└── documents/
+│   ├── an505-qemu.elf       # 测试固件
+│   └── audio_test_*k.wav    # 麦克风录音测试音频（8k/16k/44k/48k）
+└── docs/
     └── msys2_qemu_build_steps.md  # 详细的 MSYS2 环境搭建与 QEMU 构建步骤
 ```
 
@@ -38,7 +41,7 @@ qemu-embedded-platform/
 
 - **Windows** + **MSYS2**（含 MINGW64 环境）
 - MSYS2 中需安装 QEMU 构建依赖（`base-devel`、`mingw-w64-x86_64-toolchain`、`glib2`、`pixman`、`gtk3`、`SDL2` 等）
-- 详细的环境搭建步骤见 [`documents/msys2_qemu_build_steps.md`](documents/msys2_qemu_build_steps.md)
+- 详细的环境搭建步骤见 [`docs/msys2_qemu_build_steps.md`](docs/msys2_qemu_build_steps.md)
 
 > 首次构建前请先 `git submodule update --init --recursive` 拉取 `qemu` 子模块。
 
@@ -133,6 +136,128 @@ cd .\testcase
 
 ---
 
+## 定制外设（MPSX Simple 设备）
+
+overlay 补丁在 `mps2-an505` 板级增加了 4 个 SysBus 设备，全部映射在 `0x51000000` 起始的 MMIO 空间（每设备 0x1000），guest 驱动通过 MMIO 寄存器直接控制：
+
+| 设备 | 类型名 | MMIO 基址 | IRQ | 用途 |
+|------|--------|-----------|-----|------|
+| LCD | `mpsx-simple-lcd` | `0x51000000` | 33 | Framebuffer 显示 |
+| Touch | `mpsx-simple-touch` | `0x51001000` | 32 | 触摸输入 |
+| Audio（输出） | `mpsx-simple-audio` | `0x51002000` | 49 | PCM 播放 |
+| Mic（输入） | `mpsx-simple-mic` | `0x51003000` | 50 | PCM 录音 |
+
+> IRQ 号是 `get_sse_irq_in()` 传入的 SSE IRQ 编号（叠加到 NVIC 的向量号）。
+
+### mpsx-simple-lcd（0x51000000）
+
+| 偏移 | 寄存器 | 说明 |
+|------|--------|------|
+| 0x00 | WIDTH | 显示宽度 |
+| 0x04 | HEIGHT | 显示高度 |
+| 0x08 | FB_ADDR | framebuffer 物理地址 |
+| 0x0C | CTRL | bit0=ENABLE, bit1=UPDATE, bit2=RESET |
+| 0x10 | STATUS | bit0=BUSY, bit1=DONE |
+| 0x14 | FORMAT | 0=ARGB8888, 1=RGB888, 2=RGB565 |
+| 0x18 | STRIDE | 每行字节数 |
+| 0x1C / 0x20 | INT_EN / INT_STATUS | 中断使能/状态 |
+
+### mpsx-simple-touch（0x51001000）
+
+| 偏移 | 寄存器 | 说明 |
+|------|--------|------|
+| 0x00 | STATUS | bit0=PRESSED, bit1=READY |
+| 0x04 / 0x08 | X / Y | 12-bit 触摸坐标（0-4095） |
+| 0x0C | CTRL | bit0=CLEAR_INT |
+| 0x10 | ID | 设备 ID（"MPSX"） |
+| 0x14 / 0x18 | RES_X / RES_Y | 分辨率 4096 |
+
+由 QEMU 输入子系统驱动（鼠标/触摸），无需命令行参数。
+
+### mpsx-simple-audio（0x51002000，输出）
+
+| 偏移 | 寄存器 | 说明 |
+|------|--------|------|
+| 0x00 | CTRL | bit0=ENABLE, bit1=RESET, bit2=UPDATE |
+| 0x04 | STATUS | bit0=BUSY, bit1=DONE, bit2=UNDERRUN |
+| 0x08 | FORMAT | bits[1:0]: 0=U8,1=S16；bit2=stereo |
+| 0x0C / 0x10 | BUF_ADDR / BUF_LEN | PCM 缓冲地址/长度 |
+| 0x14 | SAMPLE_RATE | 采样率（1000-192000） |
+| 0x18 | PLAY_POS | 播放位置（只读） |
+| 0x1C / 0x20 | INT_EN / INT_STATUS | 中断使能/状态 |
+
+guest 驱动把 PCM 数据写入 `BUF_ADDR` 指定内存，设备经音频后端播放；播放完一轮触发 DONE 中断请求补充数据。
+
+### mpsx-simple-mic（0x51003000，输入）
+
+寄存器布局与 audio 输出镜像（`REC_POS` 代替 `PLAY_POS`），设备把采集到的 PCM 数据 DMA 写入 `BUF_ADDR` 指向的 guest 内存，写满一轮触发 DONE 中断，guest 驱动读取录音数据。
+
+采集源二选一：
+- **WAV 文件**（测试用，无需真实音频硬件）：`-global mpsx-simple-mic.infile=<路径>`，设备按 WAV 采样率循环喂 PCM。
+- **真实麦克风**：通过机器 `audiodev` 属性关联 `-audiodev` 后端（如 `dsound`/`sdl` 的输入通道）。
+
+---
+
+## 构建后运行 QEMU（使用示例）
+
+构建产物为 `qemu/qemu-build/qemu-system-arm.exe`（也可直接使用 `qemu/qemu-configure/qemu-system-arm.exe`）。
+
+### 基本运行（LCD + Touch）
+
+```powershell
+.\qemu\qemu-build\qemu-system-arm.exe `
+  -machine mps2-an505 -cpu cortex-m33 -m 16M `
+  -kernel .\testcase\an505-qemu.elf `
+  -display sdl,show-cursor=on -serial stdio
+```
+
+### 音频播放（mpsx-simple-audio）
+
+先定义音频后端并把机器 `audiodev` 指向它：
+
+```powershell
+.\qemu\qemu-build\qemu-system-arm.exe `
+  -machine mps2-an505 -cpu cortex-m33 -m 16M `
+  -kernel .\testcase\an505-qemu.elf `
+  -audiodev dsound,id=aud0,out.frequency=44100,out.channels=2 `
+  -global mps2-an505.audiodev=aud0 `
+  -display sdl,show-cursor=on -serial stdio
+```
+
+### 麦克风录音（mpsx-simple-mic）
+
+**方式一：WAV 文件源**（无需麦克风，测试最方便）：
+
+```powershell
+.\qemu\qemu-build\qemu-system-arm.exe `
+  -machine mps2-an505 -cpu cortex-m33 -m 16M `
+  -kernel .\testcase\an505-qemu.elf `
+  -global mpsx-simple-mic.infile=testcase\audio_test_8k.wav `
+  -display sdl,show-cursor=on -serial stdio
+```
+
+> 驱动侧 `SAMPLE_RATE` 需与所选 WAV 采样率一致（8k/16k/44k/48k 分别对应 8000/16000/44100/48000）。
+
+**方式二：真实麦克风**（宿主机音频输入）：
+
+```powershell
+... -audiodev dsound,id=aud0,in.voices=1 `
+    -global mps2-an505.audiodev=aud0 ...
+```
+
+### 测试音频文件（testcase/）
+
+| 文件 | 采样率 | 扫频范围 | 对应 SAMPLE_RATE |
+|------|--------|----------|------------------|
+| `audio_test_8k.wav` | 8000 | 20Hz–3.6kHz | 8000 |
+| `audio_test_16k.wav` | 16000 | 20Hz–7.2kHz | 16000 |
+| `audio_test_44k.wav` | 44100 | 20Hz–20kHz | 44100 |
+| `audio_test_48k.wav` | 48000 | 20Hz–20kHz | 48000 |
+
+每段 5 秒、16-bit 单声道 PCM，内容依次为：0.5s 静音 → 1kHz 正弦 → 440Hz 正弦 → 对数扫频 → 白噪声，覆盖电平校准、标准音高、频率响应、信噪比等常见测试。
+
+---
+
 ## 工作流程示意
 
 ```mermaid
@@ -175,6 +300,6 @@ flowchart LR
 
 ## 相关文档
 
-- [MSYS2 环境搭建与 QEMU 构建详细步骤](documents/msys2_qemu_build_steps.md)
+- [MSYS2 环境搭建与 QEMU 构建详细步骤](docs/msys2_qemu_build_steps.md)
 
 
