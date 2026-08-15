@@ -82,6 +82,7 @@
 #include "hw/display/mpsx_simple_lcd.h"
 #include "hw/input/mpsx_simple_touch.h"
 #include "hw/audio/mpsx_simple_audio.h"
+#include "hw/audio/mpsx_simple_mic.h"
 
 #define MPS2TZ_NUMIRQ_MAX 96
 #define MPS2TZ_RAM_MAX 5
@@ -1281,6 +1282,21 @@ static void mps2tz_common_init(MachineState *machine)
         sysbus_realize_and_unref(sbd, &error_fatal);
         sysbus_mmio_map(sbd, 0, 0x51002000);
         sysbus_connect_irq(sbd, 0, get_sse_irq_in(mms, 49));
+    }
+    /*
+     * Simple Microphone (Record) Device
+     */
+    {
+        DeviceState *dev;
+        SysBusDevice *sbd;
+        dev = qdev_new(TYPE_MPSX_SIMPLE_MIC);
+        if (machine->audiodev) {
+            qdev_prop_set_string(dev, "audiodev", machine->audiodev);
+        }
+        sbd = SYS_BUS_DEVICE(dev);
+        sysbus_realize_and_unref(sbd, &error_fatal);
+        sysbus_mmio_map(sbd, 0, 0x51003000);
+        sysbus_connect_irq(sbd, 0, get_sse_irq_in(mms, 50));
     }
 
     /*

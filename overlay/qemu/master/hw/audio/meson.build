@@ -1,5 +1,6 @@
 system_ss.add(files('model.c'))
 system_ss.add(files('mpsx_simple_audio.c'))
+system_ss.add(files('mpsx_simple_mic.c'))
 system_ss.add(when: 'CONFIG_AC97', if_true: files('ac97.c'))
 system_ss.add(when: 'CONFIG_ADLIB', if_true: files('fmopl.c', 'adlib.c'))
 system_ss.add(when: 'CONFIG_ASC', if_true: files('asc.c'))
