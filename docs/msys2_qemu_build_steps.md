@@ -1,17 +1,13 @@
-# Win11本地构建QEMU二进制文件步骤
-
-
+# Windows本地构建QEMU步骤
 
 ## 1. 安装 MSYS2 
 
-安装：msys2-x86_64-20240113.exe
+安装：msys2-x86_64-xxxxxxxx.exe
 
-> 工程的 ./qemu-packs 目录下包含 msys2-x86_64-20240113.exe 文件，可以直接安装使用，如果需要安装最新版本请参考下面的安装方式，这里以：msys2-x86_64-20240113.exe 文件为例：
+> 需要安装最新版本请参考下面的安装方式，这里以：msys2-x86_64-20240113.exe 文件为例：
 
 网页：https://www.msys2.org/ 中，找到然后下载：msys2-x86_64-20240113.exe 文件，下载并安装即可。 
 链接：https://github.com/msys2/msys2-installer/releases/download/2024-01-13/msys2-x86_64-20240113.exe
-
-
 
 ## 2. 配置 MSYS2 
 
@@ -35,14 +31,11 @@
   Server = http://mirrors.ustc.edu.cn/msys2/mingw/x86_64
   ```
 
-
-
 ## 3. 使用 MSYS2 
 
 > 使用管理员权限打开终端
 
 开始菜单找到 MSYS2 文件夹，然后找到：MSYS2 MINGW64，使用管理员权限打开此终端
-
 
 
 ## 4. 在 MSYS2 安装 qemu 依赖库
@@ -130,8 +123,6 @@ pacman -Sy mingw-w64-x86_64-meson mingw-w64-x86_64-ninja \
            mingw-w64-x86_64-zstd
 ```
 
-
-
 ## 5. 拉取最新工程
 
 > 使用官方最新版本，请使用以下命令：
@@ -144,15 +135,11 @@ git submodule update --recursive
 mkdir ./qemu-configure
 ```
 
-
-
 ## 7. 进入临时配置目录
 
 ```shell
 cd ./qemu-configure
 ```
-
-
 
 ## 8. 配置工程
 
@@ -452,15 +439,11 @@ NOTE: The object files are built at the place where configure is launched
 ../configure --prefix=/C/Users/<用户名>/code/github/qemu-machine/qemu-build --target-list=arm-softmmu --enable-debug --disable-docs
 ```
 
-
-
 ## 9. 构建工程
 
 ```shell
 make -j16
 ```
-
-
 
 ## 10. 安装二进制文件
 
