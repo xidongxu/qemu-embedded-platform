@@ -1,3 +1,15 @@
+diff --git a/.gitignore b/.gitignore
+index 61fa39967b..195759e213 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,5 +1,7 @@
+ /GNUmakefile
+ /build/
++/qemu-configure/
++/qemu-build/
+ /.cache/
+ /.vscode/
+ *.pyc
 diff --git a/hw/arm/mps2-tz.c b/hw/arm/mps2-tz.c
 index f101c1b7c3..dbe338f465 100644
 --- a/hw/arm/mps2-tz.c
