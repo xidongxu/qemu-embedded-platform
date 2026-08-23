@@ -171,10 +171,10 @@ index 2154cbdb57..c51187ec3d 100644
  system_ss.add(when: 'CONFIG_ASC', if_true: files('asc.c'))
 diff --git a/hw/audio/mpsx_simple_audio.c b/hw/audio/mpsx_simple_audio.c
 new file mode 100644
-index 0000000000..96e8b0a959
+index 0000000000..5ef5cc1d07
 --- /dev/null
 +++ b/hw/audio/mpsx_simple_audio.c
-@@ -0,0 +1,341 @@
+@@ -0,0 +1,346 @@
 +/*
 + * QEMU MPSX simple audio device
 + *
@@ -227,10 +227,14 @@ index 0000000000..96e8b0a959
 +/* Interrupt status/enable register (bit aligned between the two) */
 +#define AUDIO_INT_DONE          (1 << 0)
 +
-+/* Format register: bits[1:0] sample width, bit2 stereo */
-+#define AUDIO_FORMAT_U8         (0)
-+#define AUDIO_FORMAT_S16        (1)
-+#define AUDIO_FORMAT_STEREO     (1 << 2)
++/* Format register: bits[1:0] sample width, bit2 stereo.
++ * NOTE: these are the DEVICE register bit values, NOT QEMU's AudioFormat
++ * enum (AUDIO_FORMAT_U8=0, AUDIO_FORMAT_S16=3).  Prefix with MPSX_FMT_ so
++ * they cannot shadow the QEMU enum in audio.h (which would turn S16 playback
++ * into S8 => half speed, e.g. 1 kHz played as 500 Hz). */
++#define MPSX_FMT_U8             (0)
++#define MPSX_FMT_S16            (1)
++#define MPSX_FMT_STEREO         (1 << 2)
 +
 +#define AUDIO_DEFAULT_RATE      (8000)
 +#define AUDIO_CHUNK_SIZE        (4096)
@@ -239,12 +243,13 @@ index 0000000000..96e8b0a959
 +    qemu_set_irq(s->irq, (s->int_status & s->int_enable) != 0);
 +}
 +
++/* Map the device FORMAT register bits to QEMU's AudioFormat enum. */
 +static AudioFormat mpsx_audio_fmt(MPSXSimpleAudioState *s) {
-+    return (s->format & 0x3) == AUDIO_FORMAT_S16 ? AUDIO_FORMAT_S16 : AUDIO_FORMAT_U8;
++    return (s->format & 0x3) == MPSX_FMT_S16 ? AUDIO_FORMAT_S16 : AUDIO_FORMAT_U8;
 +}
 +
 +static int mpsx_audio_nchannels(MPSXSimpleAudioState *s) {
-+    return (s->format & AUDIO_FORMAT_STEREO) ? 2 : 1;
++    return (s->format & MPSX_FMT_STEREO) ? 2 : 1;
 +}
 +
 +/*
@@ -348,7 +353,7 @@ index 0000000000..96e8b0a959
 +    MPSXSimpleAudioState *s = MPSX_SIMPLE_AUDIO(dev);
 +    s->ctrl = 0;
 +    s->status = AUDIO_STATUS_DONE;
-+    s->format = AUDIO_FORMAT_U8;
++    s->format = MPSX_FMT_U8;
 +    s->sample_rate = AUDIO_DEFAULT_RATE;
 +    s->buf_addr = 0;
 +    s->buf_len = 0;
@@ -418,7 +423,7 @@ index 0000000000..96e8b0a959
 +        }
 +        break;
 +    case REG_FORMAT:
-+        if ((value & 0x3) <= AUDIO_FORMAT_S16) {
++        if ((value & 0x3) <= MPSX_FMT_S16) {
 +            s->format = value & 0x7;
 +            mpsx_audio_reopen_voice(s);
 +        } else {

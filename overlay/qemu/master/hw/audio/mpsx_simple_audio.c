@@ -50,10 +50,14 @@
 /* Interrupt status/enable register (bit aligned between the two) */
 #define AUDIO_INT_DONE          (1 << 0)
 
-/* Format register: bits[1:0] sample width, bit2 stereo */
-#define AUDIO_FORMAT_U8         (0)
-#define AUDIO_FORMAT_S16        (1)
-#define AUDIO_FORMAT_STEREO     (1 << 2)
+/* Format register: bits[1:0] sample width, bit2 stereo.
+ * NOTE: these are the DEVICE register bit values, NOT QEMU's AudioFormat
+ * enum (AUDIO_FORMAT_U8=0, AUDIO_FORMAT_S16=3).  Prefix with MPSX_FMT_ so
+ * they cannot shadow the QEMU enum in audio.h (which would turn S16 playback
+ * into S8 => half speed, e.g. 1 kHz played as 500 Hz). */
+#define MPSX_FMT_U8             (0)
+#define MPSX_FMT_S16            (1)
+#define MPSX_FMT_STEREO         (1 << 2)
 
 #define AUDIO_DEFAULT_RATE      (8000)
 #define AUDIO_CHUNK_SIZE        (4096)
@@ -62,12 +66,13 @@ static void mpsx_audio_update_irq(MPSXSimpleAudioState *s) {
     qemu_set_irq(s->irq, (s->int_status & s->int_enable) != 0);
 }
 
+/* Map the device FORMAT register bits to QEMU's AudioFormat enum. */
 static AudioFormat mpsx_audio_fmt(MPSXSimpleAudioState *s) {
-    return (s->format & 0x3) == AUDIO_FORMAT_S16 ? AUDIO_FORMAT_S16 : AUDIO_FORMAT_U8;
+    return (s->format & 0x3) == MPSX_FMT_S16 ? AUDIO_FORMAT_S16 : AUDIO_FORMAT_U8;
 }
 
 static int mpsx_audio_nchannels(MPSXSimpleAudioState *s) {
-    return (s->format & AUDIO_FORMAT_STEREO) ? 2 : 1;
+    return (s->format & MPSX_FMT_STEREO) ? 2 : 1;
 }
 
 /*
@@ -171,7 +176,7 @@ static void mpsx_audio_reset(DeviceState *dev) {
     MPSXSimpleAudioState *s = MPSX_SIMPLE_AUDIO(dev);
     s->ctrl = 0;
     s->status = AUDIO_STATUS_DONE;
-    s->format = AUDIO_FORMAT_U8;
+    s->format = MPSX_FMT_U8;
     s->sample_rate = AUDIO_DEFAULT_RATE;
     s->buf_addr = 0;
     s->buf_len = 0;
@@ -241,7 +246,7 @@ static void mpsx_audio_write(void *opaque, hwaddr addr, uint64_t value, unsigned
         }
         break;
     case REG_FORMAT:
-        if ((value & 0x3) <= AUDIO_FORMAT_S16) {
+        if ((value & 0x3) <= MPSX_FMT_S16) {
             s->format = value & 0x7;
             mpsx_audio_reopen_voice(s);
         } else {
