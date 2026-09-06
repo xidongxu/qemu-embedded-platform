@@ -11,10 +11,10 @@ index 61fa39967b..195759e213 100644
  /.vscode/
  *.pyc
 diff --git a/hw/arm/mps2-tz.c b/hw/arm/mps2-tz.c
-index f101c1b7c3..dbe338f465 100644
+index 4e6744eddf..14749e8eba 100644
 --- a/hw/arm/mps2-tz.c
 +++ b/hw/arm/mps2-tz.c
-@@ -69,13 +69,20 @@
+@@ -76,13 +76,20 @@
  #include "hw/dma/pl080.h"
  #include "hw/rtc/pl031.h"
  #include "hw/ssi/pl022.h"
@@ -35,7 +35,7 @@ index f101c1b7c3..dbe338f465 100644
  
  #define MPS2TZ_NUMIRQ_MAX 96
  #define MPS2TZ_RAM_MAX 5
-@@ -147,6 +154,8 @@ struct MPS2TZMachineState {
+@@ -156,6 +163,8 @@ struct MPS2TZMachineState {
      TZPPC ppc[5];
      TZMPC mpc[3];
      PL022State spi[5];
@@ -44,7 +44,7 @@ index f101c1b7c3..dbe338f465 100644
      ArmSbconI2CState i2c[5];
      UnimplementedDeviceState i2s_audio;
      UnimplementedDeviceState gpio[4];
-@@ -700,6 +709,7 @@ static MemoryRegion *make_spi(MPS2TZMachineState *mms, void *opaque,
+@@ -722,6 +731,7 @@ static MemoryRegion *make_spi(MPS2TZMachineState *mms, void *opaque,
       * Note that if we do implement devices behind SPI, the chip select
       * lines are set via the "MISC" register in the MPS2 FPGAIO device.
       */
@@ -52,7 +52,7 @@ index f101c1b7c3..dbe338f465 100644
      PL022State *spi = opaque;
      SysBusDevice *s;
  
-@@ -707,6 +717,25 @@ static MemoryRegion *make_spi(MPS2TZMachineState *mms, void *opaque,
+@@ -729,6 +739,25 @@ static MemoryRegion *make_spi(MPS2TZMachineState *mms, void *opaque,
      sysbus_realize(SYS_BUS_DEVICE(spi), &error_fatal);
      s = SYS_BUS_DEVICE(spi);
      sysbus_connect_irq(s, 0, get_sse_irq_in(mms, irqs[0]));
@@ -78,7 +78,7 @@ index f101c1b7c3..dbe338f465 100644
      return sysbus_mmio_get_region(s, 0);
  }
  
-@@ -1214,6 +1243,71 @@ static void mps2tz_common_init(MachineState *machine)
+@@ -1340,6 +1369,71 @@ static void mps2tz_common_init(MachineState *machine)
  
      armv7m_load_kernel(mms->iotkit.armv7m[0].cpu, machine->kernel_filename,
                         0, boot_ram_size(mms));
@@ -150,7 +150,7 @@ index f101c1b7c3..dbe338f465 100644
  }
  
  static void mps2_tz_idau_check(IDAUInterface *ii, uint32_t address,
-@@ -1276,6 +1370,7 @@ static void mps2tz_class_init(ObjectClass *oc, const void *data)
+@@ -1402,6 +1496,7 @@ static void mps2tz_class_init(ObjectClass *oc, const void *data)
  
      mc->init = mps2tz_common_init;
      mc->reset = mps2_machine_reset;
@@ -159,7 +159,7 @@ index f101c1b7c3..dbe338f465 100644
  
      /* Most machines leave these at the SSE defaults */
 diff --git a/hw/audio/meson.build b/hw/audio/meson.build
-index 2154cbdb57..c51187ec3d 100644
+index 3312bcec10..bb44823321 100644
 --- a/hw/audio/meson.build
 +++ b/hw/audio/meson.build
 @@ -1,4 +1,6 @@
@@ -1497,7 +1497,7 @@ index 0000000000..991f467f10
 +
 +type_init(mpsx_touch_register_types)
 diff --git a/hw/misc/mps2-fpgaio.c b/hw/misc/mps2-fpgaio.c
-index da78cb6070..58b052957c 100644
+index 208f9fd60f..80e0d7a16f 100644
 --- a/hw/misc/mps2-fpgaio.c
 +++ b/hw/misc/mps2-fpgaio.c
 @@ -21,6 +21,7 @@
@@ -1508,7 +1508,7 @@ index da78cb6070..58b052957c 100644
  #include "migration/vmstate.h"
  #include "hw/core/registerfields.h"
  #include "hw/misc/mps2-fpgaio.h"
-@@ -215,13 +216,17 @@ static void mps2_fpgaio_write(void *opaque, hwaddr offset, uint64_t value,
+@@ -227,13 +228,17 @@ static void mps2_fpgaio_write(void *opaque, hwaddr offset, uint64_t value,
          s->prescale = value;
          break;
      case A_MISC:
@@ -1531,7 +1531,7 @@ index da78cb6070..58b052957c 100644
          break;
      case A_CLK1HZ:
          now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
-@@ -262,6 +267,7 @@ static void mps2_fpgaio_reset(DeviceState *dev)
+@@ -274,6 +279,7 @@ static void mps2_fpgaio_reset(DeviceState *dev)
      s->led0 = 0;
      s->prescale = 0;
      s->misc = 0;
@@ -1539,7 +1539,7 @@ index da78cb6070..58b052957c 100644
      s->clk1hz_tick_offset = tickoff_from_counter(now, 0, 1);
      s->clk100hz_tick_offset = tickoff_from_counter(now, 0, 100);
      s->counter = 0;
-@@ -281,6 +287,8 @@ static void mps2_fpgaio_init(Object *obj)
+@@ -293,6 +299,8 @@ static void mps2_fpgaio_init(Object *obj)
      memory_region_init_io(&s->iomem, obj, &mps2_fpgaio_ops, s,
                            "mps2-fpgaio", 0x1000);
      sysbus_init_mmio(sbd, &s->iomem);
@@ -1715,12 +1715,12 @@ index 0000000000..043a551988
 +
 +#endif
 diff --git a/include/hw/misc/mps2-fpgaio.h b/include/hw/misc/mps2-fpgaio.h
-index edd9f23121..d46befe900 100644
+index 7512686616..c6b728f560 100644
 --- a/include/hw/misc/mps2-fpgaio.h
 +++ b/include/hw/misc/mps2-fpgaio.h
-@@ -46,6 +46,9 @@ struct MPS2FPGAIO {
-     uint32_t misc;
+@@ -48,6 +48,9 @@ struct MPS2FPGAIO {
      uint32_t dbgctrl;
+     uint32_t gpioalt2;
  
 +    /* GPIO out: SPI flash chip-select, driven by bit 8 of the MISC register */
 +    qemu_irq spi_cs;
